@@ -61,6 +61,8 @@ async def run_agent_background_task(instance_id: str, request: InvestigationRequ
             "submission_date": request.submission_date,
             "instance_id": instance_id,
             "risk_score": 0,
+            "policy_category": "Pending", # Added
+            "policy_context": "",          # Added
             "compliance_report": "", # Initialize empty strings to avoid None errors
             "final_verdict": ""
         }

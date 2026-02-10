@@ -41,14 +41,14 @@ def audit_step(node_name: str):
             # Audit Trail
             evaluations_db.add_texts(
                 texts=[f"Started {node_name}"],
-                metadatas={"instance_id": state["instance_id"], "status": f"{node_name}_running"}
+                metadatas=[{"instance_id": state["instance_id"], "status": f"{node_name}_running"}]
             )
             
             result = func(state, *args, **kwargs)
             
             evaluations_db.add_texts(
                 texts=[f"Finished {node_name}"],
-                metadatas={"instance_id": state["instance_id"], "status": f"{node_name}_done"}
+                metadatas=[{"instance_id": state["instance_id"], "status": f"{node_name}_done"}]
             )
             return result
         return wrapper

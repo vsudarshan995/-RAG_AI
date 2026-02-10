@@ -2,7 +2,7 @@ from typing import Annotated, TypedDict, Optional
 from datetime import datetime
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 # Modular Imports
@@ -28,9 +28,9 @@ class AgentState(TypedDict):
 
 # --- NODES ---
 
-@audit_step("Initialization") # Triggers instance_log and evaluations_db
+#@audit_step("Initialization") # Triggers instance_log and evaluations_db
 def initialization_node(state: AgentState):
-    return {"messages": [SystemMessage(content=f"Audit process started.")]}
+    return {"messages": [SystemMessage(content=f"Audit Log Initialized for Instance: {state['instance_id']}")]}
 
 @audit_step("Policy Selection")
 def policy_selector_node(state: AgentState):
@@ -39,7 +39,8 @@ def policy_selector_node(state: AgentState):
     category = docs[0].metadata.get("document_category", "General") if docs else "General"
     return {
         "policy_category": category,
-        "policy_context": "\n".join([d.page_content for d in docs])
+        "policy_context": "\n".join([d.page_content for d in docs]),
+        "messages": [SystemMessage(content=f"Context fetched for category: {category}")]
     }
 
 @audit_step("History Investigation")
@@ -52,20 +53,30 @@ def history_investigator_node(state: AgentState):
     analysis = chain.invoke({"client_id": state["client_id"], "history": history})
     
     risk = 25 if "suspicious" in analysis.lower() else 0
-    return {"risk_score": state["risk_score"] + risk}
+    return {"risk_score": state["risk_score"] + risk, "messages": [SystemMessage(content="History analyzed.")]}
 
 @audit_step("Compliance Evaluation")
 def compliance_evaluator_node(state: AgentState):
     rules = "1. 30-day submission limit. 2. Police Report for accidents."
-    report = llm.invoke(f"Apply Rules: {rules}\nContext: {state['messages'][0].content}")
-    risk = 40 if "violation" in report.lower() else 0
-    return {"compliance_report": report, "risk_score": state["risk_score"] + risk}
+    response = llm.invoke(f"Apply Rules: {rules}\nContext: {state['messages'][0].content}")
+    report_content = response.content if hasattr(response, 'content') else str(response)
+    
+    risk = 40 if "violation" in report_content.lower() else 0
+    return {
+        "compliance_report": report_content, 
+        "risk_score": state["risk_score"] + risk,
+        "messages": [SystemMessage(content="Compliance evaluated.")]
+    }
 
 @audit_step("Verdict Orchestration")
 def orchestrator_node(state: AgentState):
     chain = PromptRegistry.get_chain("orchestrator", llm)
-    verdict = chain.invoke({"risk_score": state['risk_score'], "report": state['compliance_report']})
-    return {"final_verdict": verdict}
+    res = chain.invoke({
+        "risk_score": state['risk_score'], 
+        "report": state['compliance_report']
+    })
+    verdict_text = res.content if hasattr(res, 'content') else str(res)
+    return {"final_verdict": verdict_text, "messages": [SystemMessage(content="Verdict orchestrated.")]}
 
 @audit_step("Final Archiver")
 def evaluation_archiver_node(state: AgentState):
@@ -91,7 +102,7 @@ def evaluation_archiver_node(state: AgentState):
         }],
         ids=[f"{state['instance_id']}_final"]
     )
-    return {"messages": [SystemMessage(content="Final result archived.")]}
+    return {"messages": [SystemMessage(content="Final result archived to Audit Log.")]}
 
 # --- ASSEMBLY ---
 workflow = StateGraph(AgentState)

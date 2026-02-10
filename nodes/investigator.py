@@ -15,4 +15,4 @@ def history_investigator_node(state):
     analysis = chain.invoke({"client_id": state["client_id"], "history": history})
     
     risk = 25 if "suspicious" in analysis.content.lower() else 0
-    return {"risk_score": state["risk_score"] + risk}
+    return {"risk_score": state["risk_score"] + risk, "messages": []}

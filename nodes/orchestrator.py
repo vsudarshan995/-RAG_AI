@@ -14,7 +14,8 @@ def orchestrator_node(state):
     # Execute synthesis based on accumulated state data
     result = chain.invoke({
         "risk_score": state["risk_score"],
-        "report": state["compliance_report"]
+        "report": state["compliance_report"],
+        
     })
     
-    return {"final_verdict": result.content}
+    return {"final_verdict": result.content,"messages": []}

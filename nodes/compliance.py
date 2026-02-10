@@ -31,5 +31,6 @@ def compliance_evaluator_node(state):
     
     return {
         "compliance_report": report.content, 
-        "risk_score": state["risk_score"] + risk
+        "risk_score": state["risk_score"] + risk,
+        "messages": []
     }

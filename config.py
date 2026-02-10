@@ -33,4 +33,6 @@ config = Config()
 # Ensure directories exist upon startup
 os.makedirs(config.DB_PATH, exist_ok=True)
 os.makedirs(config.STORAGE_PATH, exist_ok=True)
-os.makedirs(config.LOG_FILE, exist_ok=True)
+log_dir = os.path.dirname(config.LOG_FILE)
+if log_dir:
+    os.makedirs(log_dir, exist_ok=True)
