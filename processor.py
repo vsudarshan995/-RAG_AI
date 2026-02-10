@@ -1,87 +1,82 @@
 import os
-import logging
 import time
 import shutil
-from watchdog.observers.read_directory_changes import WindowsApiObserver as Observer
+from pathlib import Path
+from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
+
+# Modular Imports
+from providers.ai_service import policy_db, claims_db, embeddings, llm
+from providers.logging import logger
+from config import config #
+
 from langchain_community.document_loaders import PyMuPDFLoader
-from langchain_experimental.text_splitter import SemanticChunker # Required: pip install langchain_experimental
-from langchain_ollama import OllamaLLM
-
-# 1. Configuration for dual output
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-    handlers=[logging.FileHandler("processor_debug.log"), logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
-
-# 2. Initialize Components
-logger.info("⚙️ Initializing RAG Components with Semantic Logic...")
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-llm = OllamaLLM(model="llama3:8b-instruct-q2_K", num_ctx=2048, temperature=0)
-
-policy_db = Chroma(persist_directory=r"D:\pY\InsuranceRAG\local_db", embedding_function=embeddings, collection_name="policy_master_collection")
-claims_db = Chroma(persist_directory=r"D:\pY\InsuranceRAG\local_db", embedding_function=embeddings, collection_name="claims_collection")
+from langchain_experimental.text_splitter import SemanticChunker
 
 class IngestionHandler(PatternMatchingEventHandler):
     def __init__(self):
         super().__init__(
             patterns=["*.pdf"],
-            ignore_patterns=["*\\processed\\*", "*/processed/*"],
+            ignore_patterns=["*\\processed\\*", "*/processed/*", "*.ingesting"],
             ignore_directories=True
         )
         self.processed_cache = {}
-        
-        # Initialize Semantic Chunker once to reuse across file events
-        # 'percentile' threshold identifies jumps in semantic distance
         self.semantic_splitter = SemanticChunker(
             embeddings, 
             breakpoint_threshold_type="percentile" 
         )
-        logger.info("🏠 Handler initialized with Semantic Chunking enabled.")
+        logger.info("Handler initialized with Semantic Chunking.")
 
     def on_created(self, event): self.handle_event(event)
     def on_modified(self, event): self.handle_event(event)
 
     def handle_event(self, event):
+        # Debounce using settings from config.py
         now = time.time()
-        if event.src_path in self.processed_cache and now - self.processed_cache[event.src_path] < 5: 
+        if event.src_path in self.processed_cache and \
+           now - self.processed_cache[event.src_path] < config.DEBOUNCE_SECONDS: 
             return 
             
         self.processed_cache[event.src_path] = now
-        logger.info(f"FILE DETECTED: {os.path.basename(event.src_path)}")
+        
+        # Guard against Windows "ghost" events
+        if not os.path.exists(event.src_path):
+            return
+
+        logger.info(f"File detected: {os.path.basename(event.src_path)}")
         self.process_pdf(event.src_path)
 
-    def classify_claim_type(self, sample_text, filename):
-        policy_info = policy_db.similarity_search("Claim categories", k=3)
-        context = "\n".join([d.page_content for d in policy_info])
-        prompt = f"Context: {context}\n\nClaim: {sample_text}\n\nOutput ONLY the category name:"
-        return llm.invoke(prompt).strip()
+    def classify_claim_type(self, sample_text):
+        try:
+            policy_info = policy_db.similarity_search("Claim categories", k=3)
+            context = "\n".join([d.page_content for d in policy_info])
+            prompt = f"Context: {context}\n\nClaim: {sample_text}\n\nOutput ONLY the category name:"
+            return llm.invoke(prompt).strip()
+        except Exception as e:
+            logger.error(f"Classification failed: {e}")
+            return "General"
 
-    def wait_for_file_release(self, file_path, retries=10, delay=1):
-        for i in range(retries):
+    def wait_for_file_release(self, file_path):
+        """Uses config retries. Checks lock by attempting a write-access open."""
+        for i in range(config.FILE_RETRIES):
             try:
-                os.rename(file_path, file_path)
+                # Better than rename for checking Windows locks
+                with open(file_path, 'ab'):
+                    pass
                 return True
-            except OSError:
-                logger.warning(f"⏳ File '{os.path.basename(file_path)}' is busy. Retrying {i+1}/{retries}...")
-                time.sleep(delay)
+            except (OSError, IOError):
+                time.sleep(config.FILE_DELAY)
         return False
 
     def process_pdf(self, file_path):
         filename = os.path.basename(file_path)
-        
         if not self.wait_for_file_release(file_path):
-            logger.error(f"❌ Could not access {filename}. OS still holding lock.")
+            logger.error(f"Could not access {filename}. File is locked.")
             return
 
         temp_path = file_path + ".ingesting"
         try:
             os.rename(file_path, temp_path)
-            logger.info(f"🚀 Processing (Semantic): {filename}")
             
             parts = os.path.normpath(file_path).split(os.sep)
             is_claim = "claims" in parts
@@ -89,15 +84,13 @@ class IngestionHandler(PatternMatchingEventHandler):
             loader = PyMuPDFLoader(temp_path)
             docs = loader.load()
             
-            # --- SEMANTIC CHUNKING ---
-            # This looks at sentence embeddings and splits when the topic changes
+            logger.info(f"Splitting semantically: {filename}")
             chunks = self.semantic_splitter.split_documents(docs)
             
-            # Classification
             if is_claim:
-                category = self.classify_claim_type(docs[0].page_content[:1500] if docs else "", filename)
+                category = self.classify_claim_type(docs[0].page_content[:1500] if docs else "")
             else:
-                category = parts[-3] 
+                category = parts[-3] if len(parts) > 3 else "General"
             
             meta_data = {
                 "source_type": "Claim" if is_claim else "Policy",
@@ -113,23 +106,34 @@ class IngestionHandler(PatternMatchingEventHandler):
             db = claims_db if is_claim else policy_db
             db.add_documents(chunks)
             
-            # Move to processed
+            # Use hardcoded storage path from config
             processed_dir = os.path.join(os.path.dirname(file_path), "processed")
             os.makedirs(processed_dir, exist_ok=True)
-            shutil.move(temp_path, os.path.join(processed_dir, filename))
-            logger.info(f"✅ Indexed {len(chunks)} semantic chunks for: {filename}")
+            
+            dest_path = os.path.join(processed_dir, filename)
+            if os.path.exists(dest_path):
+                os.remove(dest_path) # Prevent shutil errors on overwrite
+                
+            shutil.move(temp_path, dest_path)
+            logger.info(f"Successfully indexed chunks for: {filename}")
             
         except Exception as e: 
-            logger.error(f"❌ Error processing {filename}:", exc_info=True)
-            if os.path.exists(temp_path): os.rename(temp_path, file_path)
+            logger.error(f"Error processing {filename}: {str(e)}")
+            if os.path.exists(temp_path): 
+                try: os.rename(temp_path, file_path)
+                except: pass
 
 if __name__ == "__main__":
-    WATCH_PATH = r"D:\pY\InsuranceRAG\storage"
+    # Ensure watch path is pulled from config.py hardcoded setting
+    WATCH_PATH = config.STORAGE_PATH
+    os.makedirs(WATCH_PATH, exist_ok=True)
+    
     observer = Observer()
     observer.schedule(IngestionHandler(), path=WATCH_PATH, recursive=True)
-    logger.info(f"🚀 Processor monitoring: {WATCH_PATH}")
+    logger.info(f"Processor monitoring: {WATCH_PATH}")
     observer.start()
     try:
         while True: time.sleep(1)
-    except KeyboardInterrupt: observer.stop()
+    except KeyboardInterrupt: 
+        observer.stop()
     observer.join()
