@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Project Specific
+local_db/
+storage/
+*.log
+processor_debug.log
+
+# Jupyter
+.ipynb_checkpoints
