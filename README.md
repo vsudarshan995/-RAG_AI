@@ -1,70 +1,46 @@
-InsuranceRAG: Multi-Agent Audit Monitor
-InsuranceRAG is a production-grade, multi-agent AI system designed to automate insurance claim investigations and compliance auditing. By leveraging stateful LangGraph orchestration, the system coordinates specialized agents to analyze policy coverage, investigate claim history, and evaluate regulatory compliance.
+Enterprise Insurance RAG & Policy Audit System
+An advanced, locally-hosted Retrieval-Augmented Generation (RAG) and workflow orchestration platform built specifically for enterprise insurance policy management, auditing, and compliance. Powered by LangGraph, ChromaDB, Ollama, and FastAPI, with an interactive Streamlit frontend.
 
-🛡️ Key Features
-Multi-Agent Orchestration: Utilizes a stateful graph to manage complex workflows across specialized nodes including Initialization, Policy Selection, History Investigation, Compliance Evaluation, and Verdict Orchestration.
+🏗️ System Architecture & Directory Structure
 
-Asynchronous Processing: Features a FastAPI backend that triggers long-running investigations as background tasks, ensuring the API remains responsive while providing tracking via unique instance IDs.
+RAG_AI/
+│
+├── core/                  # Workflow orchestration graph definitions
+│   └── graph.py           # LangGraph multi-agent workflow state and transitions
+├── nodes/                 # Specialized worker nodes for agentic workflows
+│   ├── compliance.py      # Regulatory rule-checking and validation nodes
+│   ├── investigator.py    # Deep document analysis and clause cross-referencing
+│   └── orchestrator.py    # Master router and intent classification coordinator
+├── providers/             # Backend service integrations and utilities
+│   ├── ai_service.py      # Dual-model local Ollama & ChromaDB client initialization
+│   ├── chunker.py         # Semantic text chunking and document preprocessing
+│   ├── logging.py         # Unified system event and debugging logs
+│   ├── prompts.py         # Centralized prompt engineering templates
+│   └── rag_service.py     # Graph execution wrappers and retrieval pipelines
+├── views/                 # Streamlit multi-page frontend views
+│   ├── chatbot.py         # Interactive RAG chat interface with dynamic loading states
+│   ├── clients.py         # Client record and profile management
+│   ├── dashboard.py       # Executive metrics and analytics overview
+│   ├── evaluation.py      # System performance and output audit logging
+│   ├── hitl_queue.py      # Human-in-the-Loop review and approval tasks
+│   ├── policies.py        # Policy document ingestion and metadata management
+│   └── system_admin.py    # Database reset, collection registry, and server settings
+├── notebooks/             # Jupyter Notebooks for testing and data inspection
+│   ├── data_inspector.py  # Vector database and metadata health inspection
+│   └── policy_audit.ipynb # Automated policy compliance auditing notebooks
+├── app.py                 # Streamlit multi-page entry point launcher
+├── main.py                # FastAPI backend server application entry point
+├── config.py              # Centralized environment configuration and paths
+├── langgraph.json         # LangGraph Studio configuration schema
+└── requirements.txt       # Python package dependencies
 
-Intelligent RAG (Retrieval-Augmented Generation):
+🚀 Key Features
+Local Multi-Model LLM Cascade: Optimized for consumer hardware (configured for an Intel i7 CPU / 16GB RAM setup) using Ollama (OLLAMA_MAX_LOADED_MODELS=2) to run smollm2:360m for instant intent routing and llama3.2:1b for deep document reasoning.
 
-Dual-Collection Architecture: Separates Master Policies and Client Claims within ChromaDB for precise context retrieval.
+LangGraph Orchestration: Stateful multi-agent workflows managing routing, intent extraction, category filtering, and temporal validity date-overlap matching.
 
-Semantic Chunking: Documents are split based on semantic meaning rather than arbitrary character counts to improve the quality of retrieved context.
+Relational Filename Lookup: Seamless mapping between vector chunk metadata (docid) and the master policy_registry collection to ensure accurate file source citations.
 
-Real-time Monitoring Dashboard: A built-in Streamlit dashboard allows auditors to monitor agent "thought processes," view detailed step-by-step logs, and track the status of investigation instances.
+Human-in-the-Loop (HITL) Queue: Built-in review workflows allowing compliance officers to inspect, approve, or reject automated outputs.
 
-Automated Ingestion: Employs a file-system observer to automatically detect, process, and index new PDF policies or claims added to monitored storage folders.
-
-🏗️ Architecture
-The solution is built with a modular structure for high maintainability:
-
-core/graph.py: Defines the agentic workflow and state management using LangGraph.
-
-nodes/: Contains individual specialized logic for compliance checks, history investigation, and final orchestration.
-
-providers/: Infrastructure layers for AI services (LLM/Embeddings), centralized logging, and a prompt registry.
-
-processor.py: Handles the automated background document ingestion and semantic splitting pipeline.
-
-config.py: Centralized configuration for paths, model settings, and database collection names.
-
-🚀 Getting Started
-Prerequisites
-Python 3.10+
-
-Ollama (configured with llama3:8b-instruct-q2_K)
-
-Local directory for database storage (configured in config.py)
-
-Installation
-Install dependencies:
-
-Bash
-pip install -r requirements.txt
-Configuration: Update your base paths and model settings in config.py. The default production path is set to D:\pY\InsuranceRAG.
-
-Running the System
-Start the API:
-
-Bash
-uvicorn main:app --reload
-Start the Document Processor:
-
-Bash
-python processor.py
-Launch the Dashboard:
-
-Bash
-streamlit run dashboard.py
-🛠️ API Endpoints
-POST /ask/investigate/async: Trigger a new multi-agent claim investigation.
-
-POST /upload/policy: Upload a new insurance policy to a specific category.
-
-POST /upload/claim/{client_id}/{submission_type}: Submit a new claim for investigation.
-
-DELETE /clear-all: Wipe all database collections and physical storage for a clean state.
-
-📊 Monitoring
-The system captures an Audit Trail at every node execution via a custom decorator, providing full transparency into how the final APPROVED or DENIED verdict was reached by the agents. Statuses and logs are stored in the evaluation_audit_log and instance_log collections for review in the dashboard
+Modular Streamlit Dashboard: Comprehensive views covering interactive chat, client administration, policy management, audit logs, and system configuration.
