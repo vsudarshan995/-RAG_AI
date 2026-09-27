@@ -1,0 +1,7 @@
+{
+    "dependencies": ["."],
+    "graphs": {
+        "insurance_agent": "./core/graph.py:agent_system"
+    },
+    "env": ".env"
+}

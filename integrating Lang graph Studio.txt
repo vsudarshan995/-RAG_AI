@@ -1,0 +1,23 @@
+integrating Lang graph Studio with existing project
+
+Got to project location  run cmd activate venv then run the following
+
+1. pip install --upgrade "langgraph-cli[inmem]"
+
+2. Create a file named langgraph.json in your project root directory. This is the bridge that connects the Studio to your code. Use the following configuration:
+
+{
+    "dependencies": ["."],
+    "graphs": {
+        "insurance_agent": "./core/graph.py:agent_system"
+    },
+    "env": ".env"
+}
+
+the above step should connect to the graph part of it.
+
+3. Run the development server:
+
+on cmd  run langgraph dev
+
+4. The terminal will output a URL for the LangGraph Studio Web UI (usually something like https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024). Open this link in your browser.
