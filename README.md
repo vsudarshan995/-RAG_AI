@@ -1,8 +1,12 @@
-Enterprise Insurance RAG & Policy Audit System
-An advanced, locally-hosted Retrieval-Augmented Generation (RAG) and workflow orchestration platform built specifically for enterprise insurance policy management, auditing, and compliance. Powered by LangGraph, ChromaDB, Ollama, and FastAPI, with an interactive Streamlit frontend.
+# Enterprise Insurance RAG & Policy Audit System
 
-🏗️ System Architecture & Directory Structure
+An advanced, locally-hosted Retrieval-Augmented Generation (RAG) and workflow orchestration platform built specifically for enterprise insurance policy management, auditing, and compliance. Powered by **LangGraph**, **ChromaDB**, **Ollama**, and **FastAPI**, with an interactive **Streamlit** frontend.
 
+---
+
+## 🏗️ System Architecture & Directory Structure
+
+```text
 RAG_AI/
 │
 ├── core/                  # Workflow orchestration graph definitions
@@ -33,6 +37,7 @@ RAG_AI/
 ├── config.py              # Centralized environment configuration and paths
 ├── langgraph.json         # LangGraph Studio configuration schema
 └── requirements.txt       # Python package dependencies
+
 
 🚀 Key Features
 Local Multi-Model LLM Cascade: Optimized for consumer hardware (configured for an Intel i7 CPU / 16GB RAM setup) using Ollama (OLLAMA_MAX_LOADED_MODELS=2) to run smollm2:360m for instant intent routing and llama3.2:1b for deep document reasoning.
