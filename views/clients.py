@@ -3,10 +3,11 @@ import pandas as pd
 import chromadb
 import time
 from datetime import datetime
+from config import config
 
-CHROMA_PATH = r"D:\pY\InsuranceRAG\local_db"
+CHROMA_PATH = config.DB_PATH
 
-st.title("👥 Enterprise Client Portfolio & Risk Governance")
+st.title("🛡️ Enterprise Client Portfolio & Risk Governance")
 st.caption("Centralized Directory of Customer Profiles, Historical Risk Ratings, and Policy Bindings")
 st.divider()
 
@@ -17,7 +18,7 @@ def get_chroma_client():
 client = get_chroma_client()
 
 def get_clients_collection():
-    return client.get_or_create_collection(name="client_directory")
+    return client.get_or_create_collection(name=config.COLLECTIONS["clients"])
 
 def fetch_clients_from_db():
     try:
@@ -33,21 +34,17 @@ df_clients = fetch_clients_from_db()
 
 # --- PORTFOLIO SUMMARY METRICS ---
 total_clients = len(df_clients) if not df_clients.empty else 0
-high_risk_count = len(df_clients[df_clients["risk_tier"] == "High Risk"]) if not df_clients.empty and "risk_tier" in df_clients.columns else 0
-verified_count = len(df_clients[df_clients["kyc_status"] == "Verified"]) if not df_clients.empty and "kyc_status" in df_clients.columns else 0
 total_policies = int(df_clients["active_policies"].sum()) if not df_clients.empty and "active_policies" in df_clients.columns else 0
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2 = st.columns(2)
 m1.metric("Total Client Portfolios", total_clients)
-m2.metric("KYC Verified Accounts", verified_count, delta=f"{(verified_count/total_clients*100):.0f}% compliant" if total_clients > 0 else "0%")
-m3.metric("High-Risk Tier Flagged", high_risk_count, delta="Requires monitoring" if high_risk_count > 0 else "Normal", delta_color="inverse" if high_risk_count > 0 else "normal")
-m4.metric("Active Policy Bindings", total_policies)
+m2.metric("Active Policy Bindings", total_policies)
 
 st.divider()
 
 # --- NAVIGATION TABS ---
 tab_directory, tab_onboard, tab_analytics = st.tabs([
-    "📋 Client Directory & Master List", 
+    "📚 Client Directory & Master List", 
     "➕ Onboard / Update Client", 
     "📊 Portfolio Risk Distribution"
 ])
@@ -76,7 +73,7 @@ with tab_directory:
             with st.container(border=True):
                 c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
                 c1.markdown(f"**ID:** `{row['client_id']}` | **Name:** {row['name']}")
-                c2.markdown(f"**KYC:** `{'🟢 ' + row['kyc_status']}`")
+                c2.markdown(f"**KYC:** `{'✅ ' + row['kyc_status']}`")
                 risk_color = "red" if row['risk_tier'] == "High Risk" else "orange" if row['risk_tier'] == "Medium Risk" else "green"
                 c3.markdown(f"**Risk:** :{risk_color}[**{row['risk_tier']}**]")
                 c4.markdown(f"**Policies:** {row['active_policies']}")
@@ -101,7 +98,6 @@ with tab_onboard:
         if st.form_submit_button("💾 Save / Register Client to Database", use_container_width=True):
             try:
                 col = get_clients_collection()
-                # Use upsert to handle new registrations or updating existing client IDs seamlessly
                 col.upsert(
                     documents=[f"Client Profile: {new_name} ({new_id}) with risk tier {new_risk}"],
                     metadatas=[{

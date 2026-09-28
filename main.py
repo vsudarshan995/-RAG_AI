@@ -239,6 +239,76 @@ async def register_client(request: ClientRegistrationRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- CLAIMS SUBMISSION & VALIDATION ENDPOINTS ---
+
+class ClaimSubmissionRequest(BaseModel):
+    claim_id: str
+    client_id: str
+    policy_number: str
+    incident_date: str
+    claim_amount: float
+    claim_category: str
+
+@app.post("/claims/submit", tags=["Claims & Evaluations"])
+async def submit_claim(request: ClaimSubmissionRequest, background_tasks: BackgroundTasks):
+    """
+    Validates client and policy existence, records the claim, 
+    and triggers the multi-agent investigation graph.
+    """
+    try:
+        # 1. Validate Client Exists
+        client_res = ai_service.clients_db.get(ids=[request.client_id])
+        if not client_res or not client_res.get("metadatas"):
+            raise HTTPException(status_code=404, detail=f"Client ID '{request.client_id}' not found. Register client first.")
+
+        # 2. Validate Policy Association & Validity
+        policy_res = ai_service.client_policies_db.get(ids=[request.policy_number])
+        if not policy_res or not policy_res.get("metadatas"):
+            raise HTTPException(status_code=404, detail=f"Policy number '{request.policy_number}' not found.")
+        
+        policy_meta = policy_res["metadatas"][0]
+        if policy_meta.get("client_id") != request.client_id:
+            raise HTTPException(status_code=400, detail="Policy does not belong to the specified client.")
+        
+        if policy_meta.get("status") != "Active":
+            raise HTTPException(status_code=400, detail="Associated policy is inactive or expired.")
+
+        # 3. Store Claim Record
+        ai_service.claims_db.upsert(
+            documents=[f"Claim {request.claim_id} by Client {request.client_id} for amount {request.claim_amount}"],
+            metadatas=[{
+                "claim_id": request.claim_id,
+                "client_id": request.client_id,
+                "policy_number": request.policy_number,
+                "incident_date": request.incident_date,
+                "claim_amount": request.claim_amount,
+                "claim_category": request.claim_category,
+                "status": "PENDING_EVALUATION",
+                "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }],
+            ids=[request.claim_id]
+        )
+
+        # 4. Trigger Agent Graph Background Task
+        instance_id = str(uuid.uuid4())
+        inv_request = InvestigationRequest(
+            client_id=request.client_id,
+            submission_date=request.incident_date,
+            question=f"Evaluate claim {request.claim_id} under policy {request.policy_number} for amount {request.claim_amount}."
+        )
+        background_tasks.add_task(run_agent_background_task, instance_id, inv_request)
+
+        return {
+            "status": "Success",
+            "claim_id": request.claim_id,
+            "instance_id": instance_id,
+            "message": "Claim validated and dispatched to multi-agent evaluation pipeline."
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # --- HUMAN-IN-THE-LOOP ENDPOINTS ---
 
 @app.get("/reviews/pending", tags=["Human-in-the-Loop"])

@@ -31,18 +31,21 @@ st.markdown("""
 # --- DEFINE PAGES ---
 dashboard_page = st.Page("views/dashboard.py", title="Executive Control Center", icon="📊", default=True)
 evaluation_page = st.Page("views/evaluation.py", title="Start New Evaluation", icon="🚀")
-hitl_page = st.Page("views/hitl_queue.py", title="Human Review Queue", icon="🛡️")
-policies_page = st.Page("views/policies.py", title="Manage Knowledge Base", icon="📁")
-clients_page = st.Page("views/clients.py", title="Manage Clients", icon="👥")
-system_admin_page = st.Page("views/system_admin.py", title="System Administration", icon="⚙️")
+claims_page = st.Page("views/claims.py", title="Claims & Adjudication", icon="🛡️")
+client_policies_page = st.Page("views/client_policies.py", title="Client Policy Subscriptions", icon="📋")
+hitl_page = st.Page("views/hitl_queue.py", title="Human Review Queue", icon="👥")
 
-# NEW: Quality Testing Chatbot Page
+policies_page = st.Page("views/policies.py", title="Manage Knowledge Base", icon="📁")
+clients_page = st.Page("views/clients.py", title="Manage Clients", icon="👤")
+system_admin_page = st.Page("views/system_admin.py", title="Data Administration", icon="⚙️")
+
+# Quality Testing Chatbot Page
 chatbot_page = st.Page("views/chatbot.py", title="Policy Chatbot (QA)", icon="🤖")
 
 # --- NAVIGATION SETUP ---
 pg = st.navigation({
     "Overview": [dashboard_page],
-    "Operations": [evaluation_page, hitl_page],
+    "Operations": [evaluation_page, claims_page, client_policies_page, hitl_page],
     "Administration": [policies_page, clients_page, system_admin_page],
     "Quality Testing": [chatbot_page]
 })

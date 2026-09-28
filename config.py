@@ -21,6 +21,7 @@ class Config:
         "instances": "instance_log",
         "registry": "policy_registry",
         "clients": "clients_collection",
+        "client_policies": "client_policies_collection", # <--- Added
         "human_reviews": "human_review_tasks"
     }
 

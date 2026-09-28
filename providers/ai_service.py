@@ -44,6 +44,7 @@ instance_log = Chroma(collection_name=config.COLLECTIONS["instances"], **db_args
 
 policy_registry_db = client.get_or_create_collection(name=config.COLLECTIONS["registry"])
 clients_db = client.get_or_create_collection(name=config.COLLECTIONS["clients"])
+client_policies_db = client.get_or_create_collection(name=config.COLLECTIONS["client_policies"])
 human_review_db = client.get_or_create_collection(name=config.COLLECTIONS["human_reviews"])
 
 def reset_single_collection(collection_name: str):
@@ -57,7 +58,7 @@ def reset_single_collection(collection_name: str):
         pass  # Collection might not exist yet
         
     # Recreate the correct collection instance based on config mapping
-    global policy_vr_db, claims_db, evaluations_db, instance_log, policy_registry_db, clients_db, human_review_db
+    global policy_vr_db, claims_db, evaluations_db, instance_log, policy_registry_db, clients_db, client_policies_db, human_review_db
     
     if collection_name == config.COLLECTIONS["policy_vector"]:
         policy_vr_db = Chroma(collection_name=collection_name, **db_args)
@@ -71,7 +72,9 @@ def reset_single_collection(collection_name: str):
         policy_registry_db = client.get_or_create_collection(name=collection_name)
     elif collection_name == config.COLLECTIONS["clients"]:
         clients_db = client.get_or_create_collection(name=collection_name)
+    elif collection_name == config.COLLECTIONS["client_policies"]:
+        client_policies_db = client.get_or_create_collection(name=collection_name)
     elif collection_name == config.COLLECTIONS["human_reviews"]:
-        human_review_db = client.get_or_create_collection(name=collection_name)
+        human_review_db = client.get_or_create_collection(name=collection_name)    
     else:
         client.get_or_create_collection(name=collection_name)
