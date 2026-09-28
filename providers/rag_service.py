@@ -7,7 +7,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langgraph.graph import StateGraph, END
 
 # 1. Updated Imports for Multi-Model Cascade
-from providers.ai_service import policy_db, fast_llm, reasoning_llm, policy_registry_db
+from providers.ai_service import policy_vr_db, fast_llm, reasoning_llm, policy_registry_db
 
 # --- Helper: Relational Filename Lookup ---
 def get_filename_from_registry(chunk_metadata: dict) -> str:
@@ -121,7 +121,7 @@ Always end your response by asking how you can help them audit, search, or revie
 # --- Summary Worker (Uses reasoning_llm) ---
 def summary_worker(state: ChatState) -> dict:
     try:
-        retriever = policy_db.as_retriever(search_kwargs={"k": 3})
+        retriever = policy_vr_db.as_retriever(search_kwargs={"k": 3})
         docs = retriever.invoke("policy overview summary coverage terms")
         
         if not docs:
@@ -173,7 +173,7 @@ def rag_worker(state: ChatState) -> dict:
         if active_cat and active_cat in ["Health", "Life", "Travel", "Commercial", "General"]:
             search_kwargs["filter"] = {"document_category": active_cat}
             
-        retriever = policy_db.as_retriever(search_kwargs=search_kwargs)
+        retriever = policy_vr_db.as_retriever(search_kwargs=search_kwargs)
         docs = retriever.invoke(opt_query)
         
         if not docs and opt_query != question:

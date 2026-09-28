@@ -37,7 +37,7 @@ db_args = {
     "embedding_function": embeddings
 }
 
-policy_db = Chroma(collection_name=config.COLLECTIONS["policies"], **db_args)
+policy_vr_db = Chroma(collection_name=config.COLLECTIONS["policy_vector"], **db_args)
 claims_db = Chroma(collection_name=config.COLLECTIONS["claims"], **db_args)
 evaluations_db = Chroma(collection_name=config.COLLECTIONS["audit"], **db_args)
 instance_log = Chroma(collection_name=config.COLLECTIONS["instances"], **db_args)
@@ -45,3 +45,33 @@ instance_log = Chroma(collection_name=config.COLLECTIONS["instances"], **db_args
 policy_registry_db = client.get_or_create_collection(name=config.COLLECTIONS["registry"])
 clients_db = client.get_or_create_collection(name=config.COLLECTIONS["clients"])
 human_review_db = client.get_or_create_collection(name=config.COLLECTIONS["human_reviews"])
+
+def reset_single_collection(collection_name: str):
+    """
+    Safely purges and resets a ChromaDB collection by deleting it 
+    from the persistent client and recreating it fresh.
+    """
+    try:
+        client.delete_collection(name=collection_name)
+    except Exception:
+        pass  # Collection might not exist yet
+        
+    # Recreate the correct collection instance based on config mapping
+    global policy_vr_db, claims_db, evaluations_db, instance_log, policy_registry_db, clients_db, human_review_db
+    
+    if collection_name == config.COLLECTIONS["policy_vector"]:
+        policy_vr_db = Chroma(collection_name=collection_name, **db_args)
+    elif collection_name == config.COLLECTIONS["claims"]:
+        claims_db = Chroma(collection_name=collection_name, **db_args)
+    elif collection_name == config.COLLECTIONS["audit"]:
+        evaluations_db = Chroma(collection_name=collection_name, **db_args)
+    elif collection_name == config.COLLECTIONS["instances"]:
+        instance_log = Chroma(collection_name=collection_name, **db_args)
+    elif collection_name == config.COLLECTIONS["registry"]:
+        policy_registry_db = client.get_or_create_collection(name=collection_name)
+    elif collection_name == config.COLLECTIONS["clients"]:
+        clients_db = client.get_or_create_collection(name=collection_name)
+    elif collection_name == config.COLLECTIONS["human_reviews"]:
+        human_review_db = client.get_or_create_collection(name=collection_name)
+    else:
+        client.get_or_create_collection(name=collection_name)

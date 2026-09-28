@@ -15,7 +15,7 @@ class Config:
     #GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "your_gemini_api_key_here")
     
     COLLECTIONS = {
-        "policies": "policy_master_collection",
+        "policy_vector": "vr_policy",
         "claims": "claims_collection",
         "audit": "evaluation_audit_log",
         "instances": "instance_log",

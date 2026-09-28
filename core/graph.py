@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from langgraph.checkpoint.memory import MemorySaver
 
 # Modular Imports
-from providers.ai_service import policy_db, claims_db, evaluations_db, instance_log, human_review_db, reasoning_llm
+from providers.ai_service import policy_vr_db, claims_db, evaluations_db, instance_log, human_review_db, reasoning_llm
 from providers.prompts import PromptRegistry
 from providers.logging import audit_step
 
@@ -39,7 +39,7 @@ def initialization_node(state: AgentState):
 @audit_step("Policy Selection")
 def policy_selector_node(state: AgentState):
     query = state["messages"][0].content
-    docs = policy_db.similarity_search(query, k=3)
+    docs = policy_vr_db.similarity_search(query, k=3)
     category = docs[0].metadata.get("document_category", "General") if docs else "General"
     return {
         "policy_category": category,

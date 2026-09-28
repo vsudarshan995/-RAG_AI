@@ -5,7 +5,7 @@ from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import FileSystemEventHandler
 
 # Modular Imports
-from providers.ai_service import policy_db, claims_db, embeddings, llm
+from providers.ai_service import policy_vr_db, claims_db, embeddings, llm
 from providers.logging import logger
 from config import config 
 
@@ -94,7 +94,7 @@ class IngestionHandler(FileSystemEventHandler):
                     "source_type": "Claim" if is_claim else "Policy"
                 })
             
-            db = claims_db if is_claim else policy_db
+            db = claims_db if is_claim else policy_vr_db
             db.add_documents(chunks)
             
             # Move to processed

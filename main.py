@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 # Modular Imports - Import ai_service module directly to prevent stale collection references
 import providers.ai_service as ai_service
-from providers.ai_service import router as ai_router, evaluations_db, client, ROOT_DIR, instance_log, human_review_db, clients_db, policy_db, policy_registry_db
+from providers.ai_service import router as ai_router, evaluations_db, client, ROOT_DIR, instance_log, human_review_db, clients_db, policy_vr_db, policy_registry_db
 from providers.chunker import process_document_with_semantic_chunking
 from providers.rag_service import process_rag_query
 from core.graph import agent_system, InvestigationRequest
@@ -150,7 +150,7 @@ async def process_policy_background_task(
             file_path_str, filename, category, doc_id, effective_date, effective_end_date, uploaded_by
         )
 
-        ai_service.policy_db.add_documents(chunks)
+        ai_service.policy_vr_db.add_documents(chunks)
 
         existing = ai_service.policy_registry_db.get(ids=[doc_id])
         if existing and existing.get('metadatas'):
