@@ -11,24 +11,22 @@ st.caption("Inspect and manage ChromaDB vector stores and PostgreSQL relational 
 
 tab_chroma, tab_postgres = st.tabs(["🔮 ChromaDB Vector Stores", "🐘 PostgreSQL Relational DB"])
 
-# ==============================================================================
-# TAB 1: CHROMADB VECTOR COLLECTIONS
-# ==============================================================================
+# --- TAB 1: CHROMADB ---
 with tab_chroma:
     @st.cache_resource
     def get_chroma_client():
-        # First attempt connecting to the standalone server on port 8001 (run_all.py)
         try:
-            http_client = chromadb.HttpClient(host="localhost", port=8001)
+            http_client = chromadb.HttpClient(
+                host=getattr(config, "CHROMA_HOST", "localhost"), 
+                port=getattr(config, "CHROMA_PORT", 8001)
+            )
             http_client.heartbeat()
             return http_client
         except Exception:
-            # Fallback to local persistent client if standalone server is not running
             return chromadb.PersistentClient(path=config.DB_PATH)
 
     client = get_chroma_client()
 
-    # Retain strictly active vector collections
     vector_collections = [
         config.COLLECTIONS.get("policy_vector", "vr_policy"),
         config.COLLECTIONS.get("claims", "claims_collection"),
@@ -70,7 +68,6 @@ with tab_chroma:
 
     st.divider()
     st.markdown(f"#### ⚠️ Reset Vector Collection: `{selected_col_name}`")
-    st.caption("Deletes all embedded documents and recreates the collection fresh.")
 
     if st.button("🗑️ Purge Collection", type="primary", key="btn_purge_chroma"):
         try:
@@ -81,11 +78,8 @@ with tab_chroma:
         except Exception as ex:
             st.error(f"Failed to reset collection: {ex}")
 
-# ==============================================================================
-# TAB 2: POSTGRESQL RELATIONAL TABLES
-# ==============================================================================
+# --- TAB 2: POSTGRESQL ---
 with tab_postgres:
-    # Explicit whitelist to prevent accidental SQL injection
     ALLOWED_PG_TABLES = [
         "human_review_tasks",
         "evaluation_audit_log",
@@ -97,46 +91,40 @@ with tab_postgres:
     st.markdown(f"#### 📋 Inspect Table: `{selected_pg_table}`")
 
     if st.button("🔍 Load Table Records", key="btn_load_pg"):
-        if selected_pg_table not in ALLOWED_PG_TABLES:
-            st.error("Invalid table selection.")
-        else:
-            try:
-                with pool.connection() as conn:
-                    with conn.cursor(row_factory=dict_row) as cur:
-                        cur.execute(f"SELECT * FROM {selected_pg_table} ORDER BY 1 DESC LIMIT 100;")
-                        rows = cur.fetchall()
+        try:
+            with pool.connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(f"SELECT * FROM {selected_pg_table} ORDER BY 1 DESC LIMIT 100;")
+                    rows = cur.fetchall()
 
-                if rows:
-                    df_pg = pd.DataFrame(rows)
-                    st.success(f"Loaded {len(df_pg)} rows from `{selected_pg_table}`.")
-                    st.dataframe(df_pg, use_container_width=True)
+            if rows:
+                df_pg = pd.DataFrame(rows)
+                st.success(f"Loaded {len(df_pg)} rows from `{selected_pg_table}`.")
+                st.dataframe(df_pg, use_container_width=True)
 
-                    csv_pg = df_pg.to_csv(index=False).encode("utf-8")
-                    st.download_button(
-                        label=f"📥 Export `{selected_pg_table}` CSV",
-                        data=csv_pg,
-                        file_name=f"{selected_pg_table}_export.csv",
-                        mime="text/csv",
-                        key="dl_pg_csv"
-                    )
-                else:
-                    st.info(f"Table `{selected_pg_table}` has no records.")
-            except Exception as ex:
-                st.error(f"Error querying PostgreSQL: {ex}")
+                csv_pg = df_pg.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label=f"📥 Export `{selected_pg_table}` CSV",
+                    data=csv_pg,
+                    file_name=f"{selected_pg_table}_export.csv",
+                    mime="text/csv",
+                    key="dl_pg_csv"
+                )
+            else:
+                st.info(f"Table `{selected_pg_table}` has no records.")
+        except Exception as ex:
+            st.error(f"Error querying PostgreSQL: {ex}")
 
     st.divider()
     st.markdown(f"#### ⚠️ Reset Table Data: `{selected_pg_table}`")
-    st.caption("Truncates all records inside this table (Foreign keys may restrict deletion).")
-
-    confirm_purge = st.checkbox(f"I understand this permanently removes all data in `{selected_pg_table}`", key="chk_confirm_pg")
+    confirm_purge = st.checkbox(f"Confirm truncate of `{selected_pg_table}`", key="chk_confirm_pg")
 
     if st.button("🗑️ Truncate Table Records", type="secondary", key="btn_purge_pg", disabled=not confirm_purge):
-        if selected_pg_table in ALLOWED_PG_TABLES:
-            try:
-                with pool.connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(f"TRUNCATE TABLE {selected_pg_table} CASCADE;")
-                st.success(f"Table `{selected_pg_table}` has been truncated.")
-                st.rerun()
-            except Exception as ex:
-                st.error(f"Failed to truncate table: {ex}")
+        try:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"TRUNCATE TABLE {selected_pg_table} CASCADE;")
+            st.success(f"Table `{selected_pg_table}` has been truncated.")
+            st.rerun()
+        except Exception as ex:
+            st.error(f"Failed to truncate table: {ex}")

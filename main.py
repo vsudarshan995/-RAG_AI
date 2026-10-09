@@ -3,10 +3,13 @@ import shutil
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
+from psycopg.rows import dict_row
+
+from config import config
 
 # Modular Providers
 import providers.ai_service as ai_service
@@ -18,7 +21,7 @@ from providers.ai_service import (
     policy_registry_db,
     claims_db
 )
-from providers.db_service import db_service
+from providers.db_service import db_service, pool
 from providers.chunker import process_document_with_semantic_chunking
 from providers.rag_service import process_rag_query
 from core.graph import agent_system, InvestigationRequest
@@ -124,7 +127,7 @@ async def upload_policy_document(
             ids=[doc_id]
         )
         
-        # 2. Dispatch chunking & vector ingestion
+        # 2. Dispatch background task
         background_tasks.add_task(
             process_policy_background_task, 
             str(file_path), 
@@ -139,7 +142,6 @@ async def upload_policy_document(
         return {"filename": file.filename, "doc_id": doc_id, "status": "Queued for processing."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 async def process_policy_background_task(
     file_path_str: str, 
@@ -180,7 +182,7 @@ async def process_policy_background_task(
         except Exception:
             pass
 
-# --- RAG QUERY / QUALITY TESTING CHATBOT ---
+# --- RAG QUERY / CHATBOT ENDPOINT ---
 
 class ChatQueryRequest(BaseModel):
     question: str
@@ -194,7 +196,48 @@ async def chatbot_query_endpoint(request: ChatQueryRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- CLAIMS INGESTION & AUDIT DISPATCH ---
+# --- CLIENT PORTFOLIO MANAGEMENT ENDPOINTS (POSTGRESQL) ---
+
+class ClientRegistrationRequest(BaseModel):
+    client_id: str
+    name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+@app.get("/clients", tags=["Client Management"])
+async def get_all_clients():
+    """Retrieves all registered client profiles from PostgreSQL."""
+    try:
+        with pool.connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("SELECT client_id, name, email, phone, created_at FROM clients ORDER BY created_at DESC;")
+                clients = cur.fetchall()
+        return {"clients": clients}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/clients/register", tags=["Client Management"])
+async def register_client(request: ClientRegistrationRequest):
+    """Registers or updates a client profile directly in PostgreSQL."""
+    try:
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO clients (client_id, name, email, phone)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (client_id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        email = EXCLUDED.email,
+                        phone = EXCLUDED.phone;
+                    """,
+                    (request.client_id, request.name, request.email, request.phone)
+                )
+        return {"status": "Success", "client_id": request.client_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- CLAIMS SUBMISSION & EVALUATION ENDPOINTS ---
 
 class ClaimSubmissionRequest(BaseModel):
     claim_id: str
@@ -206,11 +249,8 @@ class ClaimSubmissionRequest(BaseModel):
 
 @app.post("/claims/submit", tags=["Claims & Evaluations"])
 async def submit_claim(request: ClaimSubmissionRequest, background_tasks: BackgroundTasks):
-    """
-    Records the claim vector embedding and triggers the multi-agent investigation graph.
-    """
     try:
-        # Ingest claim narrative into vector store for anomaly similarity search
+        # Ingest claim semantic description into ChromaDB vector store
         claims_db.upsert(
             documents=[f"Claim {request.claim_id} by Client {request.client_id} for amount {request.claim_amount} AED. Category: {request.claim_category}"],
             metadatas=[{
@@ -243,11 +283,10 @@ async def submit_claim(request: ClaimSubmissionRequest, background_tasks: Backgr
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- HUMAN-IN-THE-LOOP (POSTGRESQL-BACKED) ---
+# --- HUMAN-IN-THE-LOOP (POSTGRESQL) ---
 
 @app.get("/reviews/pending", tags=["Human-in-the-Loop"])
 async def list_pending_reviews():
-    """Retrieves all insurance claims currently flagged for human review from PostgreSQL."""
     try:
         tasks = db_service.get_pending_reviews()
         return {"pending_reviews": tasks}
@@ -256,7 +295,6 @@ async def list_pending_reviews():
 
 @app.get("/review/pending/{instance_id}", tags=["Human-in-the-Loop"])
 async def get_pending_review_details(instance_id: str):
-    """Fetches the paused workflow state snapshot from PostgreSQL."""
     config_dict = {"configurable": {"thread_id": instance_id}}
     state_snapshot = agent_system.get_state(config_dict)
     
@@ -271,7 +309,6 @@ async def get_pending_review_details(instance_id: str):
 
 @app.post("/review/resolve/{instance_id}", tags=["Human-in-the-Loop"])
 async def resolve_human_review(instance_id: str, action: str, comments: str = ""):
-    """Resolves human review, marks task resolved in PostgreSQL, and resumes the agent graph."""
     action_clean = action.strip().lower()
     if action_clean not in ["approve", "reject"]:
         raise HTTPException(status_code=400, detail="Action must be 'approve' or 'reject'.")
@@ -280,17 +317,12 @@ async def resolve_human_review(instance_id: str, action: str, comments: str = ""
     status_label = "APPROVED" if action_clean == "approve" else "REJECTED"
 
     try:
-        # 1. Update LangGraph state in PostgreSQL
         agent_system.update_state(
             thread_config,
             {"human_action": action_clean, "human_comments": comments},
             as_node="human_review"
         )
-        
-        # 2. Resume graph to completion
         agent_system.invoke(None, config=thread_config)
-
-        # 3. Mark task completed in PostgreSQL relational table
         db_service.resolve_review_task(instance_id, status_label, comments)
 
         return {"instance_id": instance_id, "status": f"Successfully resolved as {status_label}"}
