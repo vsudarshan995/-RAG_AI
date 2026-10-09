@@ -2,14 +2,27 @@ import sys
 import time
 import signal
 import subprocess
+import urllib.request
 from pathlib import Path
 
-# Paths & Virtual Environment Executables
 BASE_DIR = Path(__file__).resolve().parent
 PYTHON_EXE = sys.executable
 LOCAL_DB_PATH = BASE_DIR / "local_db"
 
 processes = []
+
+def wait_for_chroma(port=8001, timeout=15):
+    """Polls ChromaDB until it is ready to accept connections."""
+    url = f"http://localhost:{port}/api/v1/heartbeat"
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            with urllib.request.urlopen(url, timeout=1) as response:
+                if response.status == 200:
+                    return True
+        except Exception:
+            time.sleep(0.5)
+    return False
 
 def start_services():
     print("=" * 60)
@@ -28,8 +41,12 @@ def start_services():
     )
     processes.append(("ChromaDB", chroma_proc))
 
-    # Small delay to give ChromaDB time to bind to port 8001
-    time.sleep(2)
+    # Wait until ChromaDB responds before starting dependent services
+    print("      Waiting for ChromaDB service to become ready...")
+    if wait_for_chroma(port=8001):
+        print("      ChromaDB is healthy and listening on port 8001.")
+    else:
+        print("      Warning: ChromaDB took longer than expected to report healthy.")
 
     # 2. Start FastAPI (Uvicorn) on port 8000
     print("[2/3] Starting FastAPI Agent Backend (port 8000)...")
@@ -75,13 +92,11 @@ def cleanup(sig=None, frame=None):
     sys.exit(0)
 
 if __name__ == "__main__":
-    # Intercept termination signals (Ctrl + C)
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
     start_services()
 
-    # Keep the orchestrator loop running and monitor children
     try:
         while True:
             for name, proc in processes:

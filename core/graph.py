@@ -4,18 +4,15 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
-
-# Database Checkpointing
-from psycopg_pool import ConnectionPool
-from psycopg.rows import dict_row
 from langgraph.checkpoint.postgres import PostgresSaver
 
-# Modular Imports
+# Modular Providers & Configuration
 from config import config
-from providers.ai_service import policy_vr_db, instance_log, evaluations_db, human_review_db
+from providers.ai_service import policy_vr_db
 from providers.logging import audit_step
+from providers.db_service import pool, db_service
 
-# Import modular node implementations from nodes/
+# Modular Node Implementations
 from nodes.compliance import compliance_evaluator_node
 from nodes.investigator import history_investigator_node
 from nodes.orchestrator import orchestrator_node
@@ -42,7 +39,7 @@ class AgentState(TypedDict):
     human_comments: Optional[str]  # Reviewer notes
 
 
-# --- GRAPH CORE NODES ---
+# --- GRAPH ORCHESTRATION NODES ---
 
 @audit_step("Initialization")
 def initialization_node(state: AgentState):
@@ -51,12 +48,13 @@ def initialization_node(state: AgentState):
 
 @audit_step("Policy Selection")
 def policy_selector_node(state: AgentState):
-    # Find the most recent user prompt in messages
+    # Robust message extraction: look for the last human input rather than index 0
     query = ""
     for msg in reversed(state.get("messages", [])):
         if isinstance(msg, HumanMessage) or (isinstance(msg, dict) and msg.get("role") == "user"):
             query = getattr(msg, "content", msg.get("content", ""))
             break
+            
     if not query and state.get("messages"):
         first_msg = state["messages"][0]
         query = getattr(first_msg, "content", str(first_msg))
@@ -70,31 +68,24 @@ def policy_selector_node(state: AgentState):
     }
 
 
-# --- HUMAN-IN-THE-LOOP & ROUTING ---
+# --- ROUTING & HITL INTERCEPTION ---
 
 def check_for_anomalies(state: AgentState) -> str:
     """
-    Evaluates risk score. If > 65, register task in database and route to human review.
+    Evaluates accumulated risk. If risk > 65, stores the pending task in PostgreSQL 
+    and routes to the human_review breakpoint.
     """
     risk_score = state.get("risk_score", 0)
-    instance_id = state.get("instance_id", "")
+    instance_id = state.get("instance_id")
     
     if risk_score > 65:
-        try:
-            human_review_db.add_texts(
-                texts=[f"Pending review for client {state.get('client_id')} due to high risk score: {risk_score}"],
-                metadatas=[{
-                    "instance_id": instance_id,
-                    "client_id": state.get("client_id", "N/A"),
-                    "status": "PENDING_REVIEW",
-                    "risk_score": risk_score,
-                    "compliance_report": state.get("compliance_report", ""),
-                    "created_at": datetime.now().isoformat()
-                }],
-                ids=[instance_id]
-            )
-        except Exception:
-            pass
+        # Atomic registration in PostgreSQL relational table
+        db_service.create_review_task(
+            instance_id=instance_id,
+            client_id=state.get("client_id", "CLIENT_UNKNOWN"),
+            risk_score=risk_score,
+            compliance_report=state.get("compliance_report", "")
+        )
         return "human_review"
     return "orchestrator"
 
@@ -102,7 +93,7 @@ def check_for_anomalies(state: AgentState) -> str:
 @audit_step("Human Review Interception")
 def human_review_node(state: AgentState):
     """
-    Executes after the graph resumes from a breakpoint via human command.
+    Resumes after human compliance action is applied via agent_system.update_state().
     """
     action = state.get("human_action", "pending")
     comments = state.get("human_comments", "")
@@ -111,39 +102,29 @@ def human_review_node(state: AgentState):
     
     return {
         "final_verdict": verdict,
-        "compliance_report": state.get("compliance_report", "") + f"\n[HITL Audit] Human Decision: {action} | Comments: {comments}",
-        "messages": [SystemMessage(content=f"Human review completed with action: {action}")]
+        "compliance_report": state.get("compliance_report", "") + f"\n[HITL Audit] Decision: {action} | Notes: {comments}",
+        "messages": [SystemMessage(content=f"Human review completed: {action}")]
     }
 
 
 @audit_step("Final Archiver")
 def evaluation_archiver_node(state: AgentState):
-    instance_log.add_texts(
-        texts=[f"Evaluation successfully completed for {state['client_id']}"],
-        metadatas=[{
-            "instance_id": state["instance_id"],
-            "client_id": state["client_id"],
-            "status": "COMPLETED",
-            "risk_score": state["risk_score"],
-            "completion_time": datetime.now().isoformat()
-        }],
-        ids=[state["instance_id"]]
+    """
+    Archives completed verdicts to PostgreSQL relational audit logs.
+    """
+    db_service.archive_evaluation(
+        instance_id=state["instance_id"],
+        client_id=state.get("client_id", "CLIENT_UNKNOWN"),
+        risk_score=state.get("risk_score", 0),
+        final_verdict=state.get("final_verdict", "")
     )
-
-    evaluations_db.add_texts(
-        texts=[f"Final Verdict: {state['final_verdict']}"],
-        metadatas=[{
-            "instance_id": state["instance_id"],
-            "status": "COMPLETED",
-            "risk_score": state["risk_score"]
-        }],
-        ids=[f"{state['instance_id']}_final"]
-    )
-    return {"messages": [SystemMessage(content="Final result archived to Audit Log.")]}
+    return {"messages": [SystemMessage(content="Evaluation archived to PostgreSQL audit log.")]}
 
 
-# --- ASSEMBLY ---
+# --- WORKFLOW ASSEMBLY ---
+
 workflow = StateGraph(AgentState)
+
 workflow.add_node("initializer", initialization_node)
 workflow.add_node("selector", policy_selector_node)
 workflow.add_node("investigator", history_investigator_node)
@@ -170,12 +151,7 @@ workflow.add_edge("human_review", "archiver")
 workflow.add_edge("orchestrator", "archiver")
 workflow.add_edge("archiver", END)
 
-# PostgreSQL Connection Pool & Checkpointer
-pool = ConnectionPool(
-    conninfo=config.POSTGRES_DB_URI,
-    max_size=20,
-    kwargs={"autocommit": True, "row_factory": dict_row}
-)
+# PostgreSQL State Checkpointer
 checkpointer = PostgresSaver(pool)
 
 agent_system = workflow.compile(
