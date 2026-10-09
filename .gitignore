@@ -13,3 +13,8 @@ processor_debug.log
 
 # Jupyter
 .ipynb_checkpoints
+
+# LangGraph Studio local state and pickled checkpoints
+.langgraph_api/
+*.pckl
+*.pickle

@@ -1,0 +1,48 @@
+services:
+  # Backend API (FastAPI / LangGraph)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_api
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - langgraph_data:/app/.langgraph_api
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  # Frontend UI (Streamlit)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_frontend
+    restart: unless-stopped
+    command: >
+      python -m streamlit run app.py
+      --server.port 8501
+      --server.address 0.0.0.0
+      --server.headless true
+      --server.enableCORS false
+      --server.enableXsrfProtection false
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BACKEND_API_URL=http://api:8000
+    depends_on:
+      - api
+
+volumes:
+  langgraph_data:
+    driver: local

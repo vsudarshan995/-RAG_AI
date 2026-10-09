@@ -4,17 +4,28 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
-from langgraph.checkpoint.memory import MemorySaver
+
+# Database Checkpointing
+from psycopg_pool import ConnectionPool
+from psycopg.rows import dict_row
+from langgraph.checkpoint.postgres import PostgresSaver
 
 # Modular Imports
-from providers.ai_service import policy_vr_db, claims_db, evaluations_db, instance_log, human_review_db, reasoning_llm
-from providers.prompts import PromptRegistry
+from config import config
+from providers.ai_service import policy_vr_db, instance_log, evaluations_db, human_review_db
 from providers.logging import audit_step
+
+# Import modular node implementations from nodes/
+from nodes.compliance import compliance_evaluator_node
+from nodes.investigator import history_investigator_node
+from nodes.orchestrator import orchestrator_node
+
 
 class InvestigationRequest(BaseModel):
     client_id: str
     submission_date: str
     question: Optional[str] = None
+
 
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
@@ -27,18 +38,29 @@ class AgentState(TypedDict):
     compliance_report: str
     final_verdict: str
     # Human-in-the-Loop Fields
-    human_action: Optional[str]   # 'approve' or 'reject'
-    human_comments: Optional[str] # Reviewer notes
+    human_action: Optional[str]    # 'approve' or 'reject'
+    human_comments: Optional[str]  # Reviewer notes
 
-# --- NODES ---
+
+# --- GRAPH CORE NODES ---
 
 @audit_step("Initialization")
 def initialization_node(state: AgentState):
     return {"messages": [SystemMessage(content=f"Audit Log Initialized for Instance: {state['instance_id']}")]}
 
+
 @audit_step("Policy Selection")
 def policy_selector_node(state: AgentState):
-    query = state["messages"][0].content
+    # Find the most recent user prompt in messages
+    query = ""
+    for msg in reversed(state.get("messages", [])):
+        if isinstance(msg, HumanMessage) or (isinstance(msg, dict) and msg.get("role") == "user"):
+            query = getattr(msg, "content", msg.get("content", ""))
+            break
+    if not query and state.get("messages"):
+        first_msg = state["messages"][0]
+        query = getattr(first_msg, "content", str(first_msg))
+
     docs = policy_vr_db.similarity_search(query, k=3)
     category = docs[0].metadata.get("document_category", "General") if docs else "General"
     return {
@@ -47,46 +69,23 @@ def policy_selector_node(state: AgentState):
         "messages": [SystemMessage(content=f"Context fetched for category: {category}")]
     }
 
-@audit_step("History Investigation")
-def history_investigator_node(state: AgentState):
-    past_docs = claims_db.similarity_search(state["submission_date"], k=5, filter={"client_id": state["client_id"]})
-    history = "\n".join([d.page_content for d in past_docs]) if past_docs else "No history."
-    
-    chain = PromptRegistry.get_chain("history_investigator", reasoning_llm)
-    analysis = chain.invoke({"client_id": state["client_id"], "history": history})
-    
-    risk = 25 if "suspicious" in analysis.lower() else 0
-    return {"risk_score": state["risk_score"] + risk, "messages": [SystemMessage(content="History analyzed.")]}
 
-@audit_step("Compliance Evaluation")
-def compliance_evaluator_node(state: AgentState):
-    rules = "1. 30-day submission limit. 2. Police Report for accidents."
-    response = reasoning_llm.invoke(f"Apply Rules: {rules}\nContext: {state['messages'][0].content}")
-    report_content = response.content if hasattr(response, 'content') else str(response)
-    
-    risk = 40 if "violation" in report_content.lower() else 0
-    return {
-        "compliance_report": report_content, 
-        "risk_score": state["risk_score"] + risk,
-        "messages": [SystemMessage(content="Compliance evaluated.")]
-    }
-
-# --- HUMAN-IN-THE-LOOP & ROUTING NODES ---
+# --- HUMAN-IN-THE-LOOP & ROUTING ---
 
 def check_for_anomalies(state: AgentState) -> str:
     """
     Evaluates risk score. If > 65, register task in database and route to human review.
     """
     risk_score = state.get("risk_score", 0)
-    instance_id = state["instance_id"]
+    instance_id = state.get("instance_id", "")
     
     if risk_score > 65:
         try:
             human_review_db.add_texts(
-                texts=[f"Pending review for client {state['client_id']} due to high risk score: {risk_score}"],
+                texts=[f"Pending review for client {state.get('client_id')} due to high risk score: {risk_score}"],
                 metadatas=[{
                     "instance_id": instance_id,
-                    "client_id": state["client_id"],
+                    "client_id": state.get("client_id", "N/A"),
                     "status": "PENDING_REVIEW",
                     "risk_score": risk_score,
                     "compliance_report": state.get("compliance_report", ""),
@@ -98,6 +97,7 @@ def check_for_anomalies(state: AgentState) -> str:
             pass
         return "human_review"
     return "orchestrator"
+
 
 @audit_step("Human Review Interception")
 def human_review_node(state: AgentState):
@@ -115,15 +115,6 @@ def human_review_node(state: AgentState):
         "messages": [SystemMessage(content=f"Human review completed with action: {action}")]
     }
 
-@audit_step("Verdict Orchestration")
-def orchestrator_node(state: AgentState):
-    chain = PromptRegistry.get_chain("orchestrator", reasoning_llm)
-    res = chain.invoke({
-        "risk_score": state['risk_score'], 
-        "report": state['compliance_report']
-    })
-    verdict_text = res.content if hasattr(res, 'content') else str(res)
-    return {"final_verdict": verdict_text, "messages": [SystemMessage(content="Verdict orchestrated.")]}
 
 @audit_step("Final Archiver")
 def evaluation_archiver_node(state: AgentState):
@@ -149,6 +140,7 @@ def evaluation_archiver_node(state: AgentState):
         ids=[f"{state['instance_id']}_final"]
     )
     return {"messages": [SystemMessage(content="Final result archived to Audit Log.")]}
+
 
 # --- ASSEMBLY ---
 workflow = StateGraph(AgentState)
@@ -178,8 +170,15 @@ workflow.add_edge("human_review", "archiver")
 workflow.add_edge("orchestrator", "archiver")
 workflow.add_edge("archiver", END)
 
-memory = MemorySaver()
+# PostgreSQL Connection Pool & Checkpointer
+pool = ConnectionPool(
+    conninfo=config.POSTGRES_DB_URI,
+    max_size=20,
+    kwargs={"autocommit": True, "row_factory": dict_row}
+)
+checkpointer = PostgresSaver(pool)
+
 agent_system = workflow.compile(
-    checkpointer=memory,
+    checkpointer=checkpointer,
     interrupt_before=["human_review"]
 )

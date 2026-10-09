@@ -116,7 +116,7 @@ with tab_submit_claim:
             incident_date = col_c1.date_input("Incident Date", datetime.now())
             claim_amount = col_c2.number_input("Claim Amount ($)", min_value=10.0, value=1500.0, step=100.0)
             
-            submit_btn = st.form_submit_button("🚀 Submit Claim & Trigger Multi-Agent Audit", use_container_width=True)
+            submit_btn = st.form_submit_button("🚀 Submit Claim for Evaluation", use_container_width=True)
             
             if submit_btn:
                 if claim_id.strip() and selected_policy:

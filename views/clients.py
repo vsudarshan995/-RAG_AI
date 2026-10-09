@@ -73,9 +73,13 @@ with tab_directory:
             with st.container(border=True):
                 c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
                 c1.markdown(f"**ID:** `{row['client_id']}` | **Name:** {row['name']}")
-                c2.markdown(f"**KYC:** `{'✅ ' + row['kyc_status']}`")
+                c1.caption(f"DOB: {row.get('dob', 'N/A')}")
+                
+                c2.markdown(f"**KYC Status:** `{row['kyc_status']}`")
+                
                 risk_color = "red" if row['risk_tier'] == "High Risk" else "orange" if row['risk_tier'] == "Medium Risk" else "green"
                 c3.markdown(f"**Risk:** :{risk_color}[**{row['risk_tier']}**]")
+                
                 c4.markdown(f"**Policies:** {row['active_policies']}")
     else:
         st.info("No client profiles found in the database. Use the onboarding tab to register clients.")
@@ -89,23 +93,23 @@ with tab_onboard:
         new_id = col_a.text_input("Client ID", f"client_{total_clients + 101}")
         new_name = col_b.text_input("Full Legal Name", placeholder="e.g. Maryam Al-Binali")
         
-        col_c, col_d = st.columns(2)
-        new_risk = col_c.selectbox("Risk Assessment", ["Low Risk", "Medium Risk", "High Risk"])
-        new_kyc = col_d.selectbox("KYC Compliance Status", ["Verified", "Pending Review"])
-        
-        initial_policies = st.number_input("Active Policies", min_value=1, max_value=10, value=1)
+        col_c, col_d, col_e = st.columns(3)
+        new_dob = col_c.date_input("Date of Birth (DOB)", datetime(1990, 1, 1))
+        new_risk = col_d.selectbox("Risk Assessment", ["Low Risk", "Medium Risk", "High Risk"])
+        new_kyc = col_e.selectbox("KYC Status", ["Clear", "Pending KYC", "Frozen", "Blocked"])
         
         if st.form_submit_button("💾 Save / Register Client to Database", use_container_width=True):
             try:
                 col = get_clients_collection()
                 col.upsert(
-                    documents=[f"Client Profile: {new_name} ({new_id}) with risk tier {new_risk}"],
+                    documents=[f"Client Profile: {new_name} ({new_id}) born on {new_dob} with risk tier {new_risk}"],
                     metadatas=[{
                         "client_id": new_id,
                         "name": new_name,
+                        "dob": str(new_dob),
                         "risk_tier": new_risk,
                         "kyc_status": new_kyc,
-                        "active_policies": int(initial_policies),
+                        "active_policies": 0,  # Default to 0 until policies are assigned
                         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     }],
                     ids=[new_id]

@@ -1,21 +1,25 @@
+from typing import Dict, Any
+from langchain_core.messages import SystemMessage
 from providers.prompts import PromptRegistry
 from providers.logging import audit_step
-from ai_service import llm
+from providers.ai_service import reasoning_llm
 
 @audit_step("orchestrator")
-def orchestrator_node(state):
+def orchestrator_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Node 4: Final Synthesis.
+    Node: Final Synthesis.
     Consolidates risk scores and compliance reports into a final verdict.
     """
-    # Retrieve the orchestrator chain
-    chain = PromptRegistry.get_chain("orchestrator", llm)
+    chain = PromptRegistry.get_chain("orchestrator", reasoning_llm)
     
-    # Execute synthesis based on accumulated state data
     result = chain.invoke({
-        "risk_score": state["risk_score"],
-        "report": state["compliance_report"],
-        
+        "risk_score": state.get("risk_score", 0),
+        "report": state.get("compliance_report", "No compliance notes.")
     })
     
-    return {"final_verdict": result.content,"messages": []}
+    verdict_text = result.content if hasattr(result, "content") else str(result)
+    
+    return {
+        "final_verdict": verdict_text,
+        "messages": [SystemMessage(content="Final verdict synthesized.")]
+    }

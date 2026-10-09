@@ -1,5 +1,9 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load variables from .env file into os.environ
+load_dotenv()
 
 class Config:
     PROD_BASE_PATH = r"D:\pY\InsuranceRAG" 
@@ -8,11 +12,17 @@ class Config:
     STORAGE_PATH = os.getenv("STORAGE_PATH", os.path.join(PROD_BASE_PATH, "storage"))
     LOG_FILE = os.getenv("LOG_FILE", os.path.join(PROD_BASE_PATH, "Logs", "processor_debug.log"))
     
+    # --- PostgreSQL Checkpointer URI ---
+    POSTGRES_DB_URI = os.getenv(
+        "POSTGRES_DB_URI", 
+        "postgresql://postgres:postgres@localhost:5432/rag_ai"
+    )
+
     # --- Multi-Model Settings ---
-    FAST_LLM_MODEL = "llama3.2:1b"    # For routing and quick greetings
-    REASONING_LLM_MODEL = "llama3.2:1b" # For deep RAG reading and summaries
+    FAST_LLM_MODEL = "llama3.2:1b"       # For routing and quick greetings
+    REASONING_LLM_MODEL = "llama3.2:1b"  # For deep RAG reading and summaries
     TEMPERATURE = 0.1
-    #GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "your_gemini_api_key_here")
+    # GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "your_gemini_api_key_here")
     
     COLLECTIONS = {
         "policy_vector": "vr_policy",
@@ -21,7 +31,7 @@ class Config:
         "instances": "instance_log",
         "registry": "policy_registry",
         "clients": "clients_collection",
-        "client_policies": "client_policies_collection", # <--- Added
+        "client_policies": "client_policies_collection",
         "human_reviews": "human_review_tasks"
     }
 
