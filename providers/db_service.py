@@ -21,7 +21,7 @@ class DatabaseService:
                     SELECT instance_id, client_id, risk_score, status, compliance_report, reviewer_comments, created_at
                     FROM human_review_tasks
                     WHERE status = 'PENDING_REVIEW'
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC;
                     """
                 )
                 return cur.fetchall()
@@ -30,12 +30,11 @@ class DatabaseService:
     def create_review_task(instance_id: str, client_id: str, risk_score: int, compliance_report: str):
         with pool.connection() as conn:
             with conn.cursor() as cur:
-                # Ensure dummy client exists or insert client if needed to satisfy FK
                 cur.execute(
                     """
                     INSERT INTO clients (client_id, name)
                     VALUES (%s, %s)
-                    ON CONFLICT (client_id) DO NOTHING
+                    ON CONFLICT (client_id) DO NOTHING;
                     """,
                     (client_id, f"Client {client_id}")
                 )
@@ -45,7 +44,7 @@ class DatabaseService:
                     VALUES (%s, %s, %s, %s, 'PENDING_REVIEW')
                     ON CONFLICT (instance_id) DO UPDATE SET
                         risk_score = EXCLUDED.risk_score,
-                        compliance_report = EXCLUDED.compliance_report
+                        compliance_report = EXCLUDED.compliance_report;
                     """,
                     (instance_id, client_id, risk_score, compliance_report)
                 )
@@ -58,7 +57,7 @@ class DatabaseService:
                     """
                     UPDATE human_review_tasks
                     SET status = %s, reviewer_comments = %s, reviewed_at = %s
-                    WHERE instance_id = %s
+                    WHERE instance_id = %s;
                     """,
                     (status, comments, datetime.now(), instance_id)
                 )
@@ -70,7 +69,7 @@ class DatabaseService:
                 cur.execute(
                     """
                     INSERT INTO evaluation_audit_log (instance_id, client_id, risk_score, final_verdict)
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s);
                     """,
                     (instance_id, client_id, risk_score, final_verdict)
                 )
