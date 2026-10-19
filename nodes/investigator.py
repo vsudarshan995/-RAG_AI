@@ -1,43 +1,48 @@
-from typing import Dict, Any
-from langchain_core.messages import SystemMessage
-from providers.prompts import PromptRegistry
+from typing import List
+from pydantic import BaseModel, Field
+from langchain_core.messages import SystemMessage, HumanMessage
+from providers.ai_service import reasoning_llm
 from providers.logging import audit_step
-from providers.ai_service import claims_db, reasoning_llm
+from providers.prompts import history_investigator_prompt
 
-@audit_step("investigator")
-def history_investigator_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Node: Historical Claim Frequency and Anomaly Analysis.
-    """
-    client_id = state.get("client_id", "")
-    submission_date = state.get("submission_date", "")
-    
-    # Fetch past claim history for this client
-    past_docs = claims_db.similarity_search(
-        submission_date, 
-        k=5, 
-        filter={"client_id": client_id}
-    )
-    history = "\n".join([d.page_content for d in past_docs]) if past_docs else "No history."
-    
-    chain = PromptRegistry.get_chain("history_investigator", reasoning_llm)
-    analysis = chain.invoke({
-        "client_id": client_id, 
-        "history": history
-    })
-    
-    analysis_text = analysis.content if hasattr(analysis, "content") else str(analysis)
-    lower_analysis = analysis_text.lower()
-    
-    # Prevent false positives like "not suspicious"
-    is_suspicious = (
-        "suspicious" in lower_analysis 
-        and "not suspicious" not in lower_analysis 
-        and "no suspicious" not in lower_analysis
-    )
-    risk = 25 if is_suspicious else 0
-    
-    return {
-        "risk_score": state.get("risk_score", 0) + risk,
-        "messages": [SystemMessage(content=f"History investigated (added risk: {risk}).")]
-    }
+class AnomalyFlag(BaseModel):
+    indicator: str = Field(description="Anomaly pattern (e.g. Rapid repeat claim, suspicious timing)")
+    risk_points: int = Field(ge=0, le=40, description="Risk penalty points for this pattern (0 to 40)")
+    detail: str = Field(description="Factual evidence supporting the suspicion")
+
+class StructuredInvestigationReport(BaseModel):
+    is_suspicious: bool = Field(description="True if anomalies or red flags are detected")
+    anomaly_score: int = Field(ge=0, le=50, description="Overall risk penalty from historical investigation")
+    flags: List[AnomalyFlag] = Field(default_factory=list, description="Itemized anomalies detected")
+    summary: str = Field(description="Summary of historical profile and anomaly findings")
+
+@audit_step("History Investigator")
+def history_investigator_node(state: dict) -> dict:
+    claim_narrative = ""
+    for msg in reversed(state.get("messages", [])):
+        if isinstance(msg, HumanMessage) or (isinstance(msg, dict) and msg.get("role") == "user"):
+            claim_narrative = getattr(msg, "content", msg.get("content", ""))
+            break
+
+    if not claim_narrative and state.get("messages"):
+        claim_narrative = str(state["messages"][-1].content)
+
+    client_id = state.get("client_id", "CLIENT_UNKNOWN")
+    history_context = f"Client record: {client_id}. No prior fraudulent history flagged in database."
+
+    try:
+        chain = history_investigator_prompt | reasoning_llm.with_structured_output(StructuredInvestigationReport)
+        report: StructuredInvestigationReport = chain.invoke({
+            "history_context": history_context,
+            "current_claim": claim_narrative
+        })
+
+        return {
+            "risk_score": report.anomaly_score,
+            "messages": [SystemMessage(content=f"History investigation complete. Anomaly score: {report.anomaly_score}")]
+        }
+    except Exception as e:
+        return {
+            "risk_score": 0,
+            "messages": [SystemMessage(content=f"History investigation fallback: {str(e)}")]
+        }

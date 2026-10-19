@@ -1,14 +1,14 @@
 from typing import List
 from pydantic import BaseModel, Field
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage
 from providers.ai_service import reasoning_llm
 from providers.logging import audit_step
+from providers.prompts import compliance_evaluator_prompt
 
 class PolicyViolation(BaseModel):
-    clause_reference: str = Field(description="Policy clause or exclusion identifier (e.g. Clause 4.2 - Police Report Requirement)")
+    clause_reference: str = Field(description="Policy clause or exclusion identifier (e.g., Clause 4.2 - Police Report Requirement)")
     violation_nature: str = Field(description="Brief description of the breached condition")
-    severity_penalty: int = Field(ge=0, le=50, description="Penalty points for this specific breach (0 to 50)")
+    severity_penalty: int = Field(ge=0, le=50, description="Penalty points for this breach (0 to 50)")
     evidence: str = Field(description="Direct snippet from claim narrative or policy")
 
 class StructuredComplianceAudit(BaseModel):
@@ -31,33 +31,8 @@ def compliance_evaluator_node(state: dict) -> dict:
     policy_context = state.get("policy_context", "Standard terms and conditions apply.")
     historical_risk = state.get("risk_score", 0)
 
-    prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            """You are a Senior Insurance Compliance Auditor.
-Audit the submitted claim against the retrieved policy clauses.
-
-Rules:
-1. Verify mandatory documentation (e.g., official police reports for motor collisions, original receipts).
-2. Check for exclusions (commercial use, unlisted drivers, territorial limits).
-3. If no conditions are violated, set is_compliant=true, detected_violations=[], and assigned_risk_score=0.
-4. If violations exist, specify each breach with a realistic severity penalty (10-50 pts).
-5. Ground all reasoning strictly in the provided policy and claim details."""
-        ),
-        (
-            "human",
-            """Retrieved Policy Context:
-{policy_context}
-
-Claim Narrative:
-{claim_narrative}
-
-Perform the structured compliance audit:"""
-        )
-    ])
-
     try:
-        evaluator_chain = prompt | reasoning_llm.with_structured_output(StructuredComplianceAudit)
+        evaluator_chain = compliance_evaluator_prompt | reasoning_llm.with_structured_output(StructuredComplianceAudit)
         audit_result: StructuredComplianceAudit = evaluator_chain.invoke({
             "policy_context": policy_context,
             "claim_narrative": claim_narrative

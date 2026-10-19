@@ -1,15 +1,21 @@
+import atexit
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from psycopg_pool import ConnectionPool
 from psycopg.rows import dict_row
 from config import config
 
-# Central connection pool owned by db_service
+# Central connection pool
 pool = ConnectionPool(
     conninfo=config.POSTGRES_DB_URI,
     max_size=20,
+    open=False, # Defers thread creation until explicitly opened or first acquired
     kwargs={"autocommit": True, "row_factory": dict_row}
 )
+pool.open()
+
+# Cleanly close pool background threads if the process exits
+atexit.register(pool.close)
 
 class DatabaseService:
     @staticmethod
@@ -69,7 +75,10 @@ class DatabaseService:
                 cur.execute(
                     """
                     INSERT INTO evaluation_audit_log (instance_id, client_id, risk_score, final_verdict)
-                    VALUES (%s, %s, %s, %s);
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (instance_id) DO UPDATE SET
+                        risk_score = EXCLUDED.risk_score,
+                        final_verdict = EXCLUDED.final_verdict;
                     """,
                     (instance_id, client_id, risk_score, final_verdict)
                 )
